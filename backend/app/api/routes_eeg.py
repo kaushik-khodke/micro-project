@@ -2,12 +2,15 @@ import shutil
 import os
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.db import models
 from app.services.eeg_preprocess_service import eeg_service
 from app.services.random_forest_service import triage_model_service
 from app.services.gemini_insight_service import gemini_service
+from app.services.eeg_csv_service import eeg_csv_service
+from app.services.eeg_report_service import eeg_report_service
 from app.core.config import settings
 
 router = APIRouter()
@@ -73,9 +76,9 @@ async def upload_eeg(
 async def process_eeg_task(study_id: int):
     """
     Background Task: Process EEG based on file type.
-    - EDF: Extract features → Random Forest → Gemini text insight
-    - PDF: Extract images from PDF pages → Gemini Vision analysis (same as IMAGE path)
-    - IMAGE: Gemini Vision → visual EEG graph interpretation (unique confidence per image)
+    - EDF: Extract features → Random Forest → Gemini text insight, Generate CSV & Full Report
+    - PDF: Extract images from PDF pages → Gemini Vision analysis → Generate Full Report
+    - IMAGE: Gemini Vision → visual EEG graph interpretation → Generate Full Report
     """
     from app.db.session import SessionLocal
     db = SessionLocal()
@@ -84,6 +87,8 @@ async def process_eeg_task(study_id: int):
         study = db.query(models.EEGStudy).filter(models.EEGStudy.id == study_id).first()
         if not study: return
 
+        features = None
+        
         if study.file_type == "IMAGE":
             # === IMAGE PATH: Use Gemini Vision for visual EEG analysis ===
             insight = await gemini_service.generate_eeg_image_insight(study.file_path)
@@ -134,27 +139,47 @@ async def process_eeg_task(study_id: int):
 
         else:
             # === EDF PATH: Feature extraction → Random Forest → Gemini text insight ===
-            features = {}
             if study.file_type == "EDF":
+                # Convert EDF to CSV
+                csv_path = eeg_csv_service.convert_edf_to_csv(study.file_path, study.id)
+                if csv_path:
+                     study.csv_path = csv_path
                 features = eeg_service.extract_features(study.file_path)
             
-            label, score = triage_model_service.predict_eeg_abnormality(features)
+            label, score = triage_model_service.predict_eeg_abnormality(features if features else {})
             
             insight = await gemini_service.generate_eeg_insight(
-                features=features,
+                features=features if features else {},
                 findings="Analysis of uploaded signal for abnormality."
             )
+            # Standardize insight structure slightly for report gen to be similar to image response
+            if "prediction_label" not in insight: insight["prediction_label"] = label
+            if "confidence_score" not in insight: insight["confidence_score"] = score
             
             ai_result = models.AIResult(
                 study_id=study.id,
                 model_score=score,
                 prediction_label=label,
-                gemini_insight=insight
+                gemini_insight=insight,
+                confidence=score
             )
+            
+        # Generate the full structured report data
+        report_data = eeg_report_service.generate_full_report(study.id, study.file_path, study.file_type, insight, features)
+        study.report_data = report_data
+        
+        if report_data and "signal_analysis" in report_data:
+             ai_result.signal_analysis = report_data["signal_analysis"]
 
         db.add(ai_result)
         study.status = "COMPLETED"
         db.commit()
+
+        # Generate PDF report in background so it's ready
+        try:
+             eeg_report_service.generate_pdf_report(study.id, study.file_name, report_data)
+        except Exception as pdf_err:
+             print(f"Failed to pre-generate PDF: {pdf_err}")
 
         # === After EEG completes: auto re-evaluate any pending triage cases for this patient ===
         try:
@@ -273,13 +298,93 @@ async def get_eeg_analysis(study_id: int, db: Session = Depends(get_db)):
         "file_name": study.file_name
     }
 
+@router.get("/{study_id}/report")
+async def get_eeg_report(study_id: int, db: Session = Depends(get_db)):
+    """
+    Returns the full structured report data for an EEG study.
+    """
+    study = db.query(models.EEGStudy).filter(models.EEGStudy.id == study_id).first()
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    
+    if study.status != "COMPLETED":
+        raise HTTPException(status_code=400, detail="Study is not completed")
+        
+    if not study.report_data:
+         raise HTTPException(status_code=404, detail="Report data not found for this study")
+         
+    return study.report_data
+
+@router.get("/{study_id}/download/csv")
+async def download_csv_file(study_id: int, db: Session = Depends(get_db)):
+    """
+    Downloads the converted CSV file.
+    """
+    study = db.query(models.EEGStudy).filter(models.EEGStudy.id == study_id).first()
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+        
+    if not study.csv_path or not os.path.exists(study.csv_path):
+        raise HTTPException(status_code=404, detail="CSV file not found or not yet generated")
+        
+    filename = f"{os.path.splitext(study.file_name)[0]}.csv"
+    return FileResponse(
+        path=study.csv_path,
+        filename=filename,
+        media_type="text/csv"
+    )
+
+@router.get("/{study_id}/download/edf")
+async def download_edf_file(study_id: int, db: Session = Depends(get_db)):
+    """
+    Downloads the EDF file.
+    """
+    study = db.query(models.EEGStudy).filter(models.EEGStudy.id == study_id).first()
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+        
+    if study.file_type != "EDF" or not os.path.exists(study.file_path):
+        raise HTTPException(status_code=404, detail="EDF file not available for this study")
+        
+    return FileResponse(
+        path=study.file_path,
+        filename=study.file_name,
+        media_type="application/octet-stream"
+    )
+
+@router.get("/{study_id}/download/report-pdf")
+async def download_report_pdf(study_id: int, db: Session = Depends(get_db)):
+    """
+    Downloads the professionally formatted PDF report.
+    """
+    study = db.query(models.EEGStudy).filter(models.EEGStudy.id == study_id).first()
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+        
+    if study.status != "COMPLETED" or not study.report_data:
+        raise HTTPException(status_code=400, detail="Report not generated yet")
+        
+    # Check if pre-generated, if not try to generate
+    report_dir = os.path.join(settings.UPLOADS_DIR, "reports")
+    pdf_path = os.path.join(report_dir, f"EEG_FullReport_{study_id}.pdf")
+    
+    if not os.path.exists(pdf_path):
+        pdf_path = eeg_report_service.generate_pdf_report(study.id, study.file_name, study.report_data)
+        if not pdf_path or not os.path.exists(pdf_path):
+             raise HTTPException(status_code=500, detail="Failed to generate PDF report")
+             
+    filename = f"EEG_Report_{os.path.splitext(study.file_name)[0]}.pdf"
+    return FileResponse(
+        path=pdf_path,
+        filename=filename,
+        media_type="application/pdf"
+    )
+
 @router.get("/{study_id}/download")
 async def download_original_file(study_id: int, db: Session = Depends(get_db)):
     """
     Downloads the original file (EDF, PDF, or Image) uploaded for the study.
     """
-    from fastapi.responses import FileResponse
-    
     study = db.query(models.EEGStudy).filter(models.EEGStudy.id == study_id).first()
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")

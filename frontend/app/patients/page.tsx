@@ -43,6 +43,7 @@ export default function PatientsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
   const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
+  const [mounted, setMounted] = useState(false);
 
   const fetchPatients = async () => {
     try {
@@ -109,8 +110,11 @@ export default function PatientsPage() {
   };
 
   useEffect(() => {
+    setMounted(true);
     fetchPatients();
   }, []);
+
+  if (!mounted) return null;
 
   const getStatusBadge = (status: string) => {
     switch (status) {

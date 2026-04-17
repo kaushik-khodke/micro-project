@@ -1,9 +1,6 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict
-from typing import Optional
-from datetime import datetime
 
 class PatientBase(BaseModel):
     name: str
@@ -25,10 +22,8 @@ class PatientUpdate(BaseModel):
 class Patient(PatientBase):
     id: int
     created_at: datetime
-    lastVisit: Optional[datetime] = None # Added for frontend compatibility
-    status: Optional[str] = "Stable" # Added for frontend compatibility
-    priority: Optional[str] = "Normal" # Added for frontend compatibility
-
-    model_config = ConfigDict(from_attributes=True)
+    lastVisit: Optional[datetime] = None
+    status: Optional[str] = "Stable"
+    priority: Optional[str] = "Normal"
 
     model_config = ConfigDict(from_attributes=True)

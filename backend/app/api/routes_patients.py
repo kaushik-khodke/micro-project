@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
-from uuid import UUID
 
 from app.db.session import get_db
 from app.db import models
@@ -28,14 +27,14 @@ def create_patient(patient: PatientCreate, db: Session = Depends(get_db)):
     return new_patient
 
 @router.get("/{patient_id}", response_model=Patient)
-def read_patient(patient_id: UUID, db: Session = Depends(get_db)):
+def read_patient(patient_id: int, db: Session = Depends(get_db)):
     db_patient = db.query(models.Patient).filter(models.Patient.id == patient_id).first()
     if not db_patient:
         raise HTTPException(status_code=404, detail="Patient not found")
     return db_patient
 
 @router.patch("/{patient_id}", response_model=Patient)
-def update_patient(patient_id: UUID, patient: PatientUpdate, db: Session = Depends(get_db)):
+def update_patient(patient_id: int, patient: PatientUpdate, db: Session = Depends(get_db)):
     db_patient = db.query(models.Patient).filter(models.Patient.id == patient_id).first()
     if not db_patient:
         raise HTTPException(status_code=404, detail="Patient not found")
@@ -50,7 +49,7 @@ def update_patient(patient_id: UUID, patient: PatientUpdate, db: Session = Depen
     return db_patient
 
 @router.delete("/{patient_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_patient(patient_id: UUID, db: Session = Depends(get_db)):
+def delete_patient(patient_id: int, db: Session = Depends(get_db)):
     db_patient = db.query(models.Patient).filter(models.Patient.id == patient_id).first()
     if not db_patient:
         raise HTTPException(status_code=404, detail="Patient not found")

@@ -379,24 +379,35 @@ export default function EEGPage() {
                       </div>
                       
                       {/* Action */}
-                      <div className="flex justify-end min-w-[140px]">
+                      <div className="flex justify-end min-w-[240px] gap-2">
                         {file.status === 'COMPLETED' ? (
-                          <Button 
-                            variant="default" 
-                            size="sm" 
-                            className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-bold text-[10px] h-8 gap-1.5 px-4"
-                            onClick={() => handleViewResults(file)}
-                            disabled={fetchingResultId === file.id}
-                          >
-                            {fetchingResultId === file.id ? (
-                              <Loader2 size={12} className="animate-spin" />
-                            ) : (
-                              <>
-                                <BarChart3 size={12} />
-                                View Analysis
-                              </>
-                            )}
-                          </Button>
+                          <>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="text-primary border-primary/20 hover:bg-primary/5 rounded-lg font-bold text-[10px] h-8 gap-1.5 px-3"
+                              onClick={() => handleViewResults(file)}
+                              disabled={fetchingResultId === file.id}
+                            >
+                              {fetchingResultId === file.id ? (
+                                <Loader2 size={12} className="animate-spin" />
+                              ) : (
+                                <>
+                                  <Sparkles size={12} />
+                                  Quick Insight
+                                </>
+                              )}
+                            </Button>
+                            <Button 
+                              variant="default" 
+                              size="sm" 
+                              className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-bold text-[10px] h-8 gap-1.5 px-4 shadow-sm"
+                              onClick={() => window.open(`/eeg/${file.id}/report`, '_blank')}
+                            >
+                              <BarChart3 size={12} />
+                              Full Report
+                            </Button>
+                          </>
                         ) : (
                           <Button variant="outline" size="sm" disabled={file.status !== 'FAILED' && file.status !== 'failed'} className="rounded-lg text-[10px] font-bold h-8 border-border">
                             {isProcessing ? (

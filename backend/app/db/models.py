@@ -90,6 +90,8 @@ class EEGStudy(Base):
     file_name = Column(String)
     file_type = Column(String) # "EDF", "PDF", or "IMAGE"
     status = Column(String, default="PROCESSING") # PROCESSING, COMPLETED, FAILED
+    csv_path = Column(String, nullable=True)
+    report_data = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     patient = relationship("Patient", back_populates="eeg_studies")
@@ -103,6 +105,7 @@ class AIResult(Base):
     model_score = Column(Float)
     prediction_label = Column(String)
     gemini_insight = Column(JSON) # Stores the structured JSON from Gemini
+    signal_analysis = Column(JSON, nullable=True)
     confidence = Column(Float)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     

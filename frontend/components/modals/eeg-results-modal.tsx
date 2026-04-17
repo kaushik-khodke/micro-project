@@ -585,27 +585,36 @@ export default function EEGResultsModal({ isOpen, onClose, result, fileName }: E
         </div>
 
         {/* Footer */}
-        <div className="p-6 bg-slate-50 border-t border-border flex justify-end gap-3">
-          <Button variant="outline" onClick={onClose} className="rounded-xl px-8">
-            Close Report
-          </Button>
+        <div className="p-6 bg-slate-50 border-t border-border flex justify-between gap-3 items-center">
           <Button 
-            onClick={handleExportPDF}
-            disabled={isExporting}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-8 relative overflow-hidden"
+             variant="outline" 
+             onClick={() => window.open(`/eeg/${result?.id || result?.study_id}/report`, '_blank')}
+             className="text-indigo-600 border-indigo-200 hover:bg-indigo-50 font-bold rounded-xl"
           >
-            {isExporting ? (
-              <>
-                <Loader2 size={16} className="mr-2 animate-spin" />
-                Exporting...
-              </>
-            ) : (
-              <>
-                <FileText size={16} className="mr-2" />
-                Export PDF
-              </>
-            )}
+             View Full Report &rarr;
           </Button>
+          <div className="flex gap-3">
+             <Button variant="outline" onClick={onClose} className="rounded-xl px-8">
+               Close Report
+             </Button>
+             <Button 
+               onClick={handleExportPDF}
+               disabled={isExporting}
+               className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-8 relative overflow-hidden"
+             >
+               {isExporting ? (
+                 <>
+                   <Loader2 size={16} className="mr-2 animate-spin" />
+                   Exporting...
+                 </>
+               ) : (
+                 <>
+                   <FileText size={16} className="mr-2" />
+                   Export PDF
+                 </>
+               )}
+             </Button>
+          </div>
         </div>
       </div>
     </div>
