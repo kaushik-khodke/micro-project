@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   CheckCircle, Loader2, Heart, Droplets, Wind,
-  Thermometer, AlertTriangle, ChevronRight, Eye, Sparkles, Timer, AlertOctagon
+  Thermometer, AlertTriangle, ChevronRight, Eye, Sparkles, Timer, AlertOctagon, Brain, Zap
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import ReactMarkdown from 'react-markdown';
@@ -268,7 +268,7 @@ export default function PatientQueue({ patients, onRefresh }: PatientQueueProps)
               <div className="flex items-center justify-between px-6 pt-5 pb-3">
                 <div className="flex items-center gap-3">
                   <h3 className="text-lg font-black text-foreground tracking-tight">{patient.patient_name}</h3>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span
                       className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest rounded border ${getSeverityBadge(
                         patient.severity
@@ -277,6 +277,24 @@ export default function PatientQueue({ patients, onRefresh }: PatientQueueProps)
                       L{patient.severity === 'RED' ? '1' : patient.severity === 'ORANGE' ? '2' : patient.severity === 'YELLOW' ? '3' : '4'}
                     </span>
                     <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">MRN: {patient.mrn}</span>
+                    {/* EEG-informed badge */}
+                    {patient.clinical_insight?._eeg_informed && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest rounded border bg-violet-50 text-violet-700 border-violet-200 animate-pulse">
+                        <Brain size={9} />
+                        EEG-Updated
+                      </span>
+                    )}
+                    {/* EEG prediction badge when EEG report exists */}
+                    {patient.eeg_report && (
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest rounded border ${
+                        patient.eeg_report.prediction === 'ABNORMAL' ? 'bg-red-50 text-red-700 border-red-200' :
+                        patient.eeg_report.prediction === 'BORDERLINE' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                        'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      }`}>
+                        <Zap size={9} />
+                        EEG: {patient.eeg_report.prediction}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <TriageCountdown arrivalTime={patient.arrival_time} severity={patient.severity} />

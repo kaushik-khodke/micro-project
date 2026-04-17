@@ -22,6 +22,9 @@ export interface TriageCase {
     recommended_action: string;
     confidence_note: string;
     disclaimer: string;
+    _eeg_informed?: boolean;
+    _eeg_prediction?: string;
+    _eeg_updated_at?: string;
   };
   eeg_report?: {
     id: number;

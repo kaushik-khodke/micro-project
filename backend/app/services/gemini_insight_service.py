@@ -12,12 +12,23 @@ class GeminiInsightService:
         else:
             self.model = None
 
-    async def generate_triage_insight(self, vitals: Dict[str, Any], symptoms: str, model_severity: str) -> Dict[str, Any]:
+    async def generate_triage_insight(self, vitals: Dict[str, Any], symptoms: str, model_severity: str, eeg_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Generates clinician-readable summaries and insights for emergency triage.
+        If eeg_context is provided, incorporates EEG findings into the clinical assessment.
         """
         if not self.model:
             return self._fallback_insight(vitals, model_severity, "Triage")
+
+        eeg_section = ""
+        if eeg_context:
+            eeg_section = f"""
+        - EEG Study Result: {eeg_context.get('prediction', 'UNKNOWN')}
+        - EEG Clinical Summary: {eeg_context.get('summary', 'Not available')}
+        - EEG Risk Level: {eeg_context.get('risk_level', 'Unknown')}
+        - EEG Key Findings: {', '.join(eeg_context.get('key_findings', []))}
+        Note: EEG data has been incorporated into the severity calculation above.
+"""
 
         prompt = f"""
         Role: Clinical Decision Support Assistant (Emergency Medicine)
@@ -26,14 +37,15 @@ class GeminiInsightService:
         Patient Data:
         - Vitals: {json.dumps(vitals)}
         - Core Complaint/Symptoms: "{symptoms}"
-        - Calculated Severity Band (Random Forest): {model_severity}
-        
+        - Calculated Severity Band (AI Model): {model_severity}
+        {eeg_section}
         Instructions:
-        1. Summarize key clinical findings based on the provided vitals and symptoms.
+        1. Summarize key clinical findings based on ALL provided data (vitals, symptoms{', and EEG' if eeg_context else ''}).
         2. Provide a concise explanation for the assigned Severity Band.
         3. Identify any immediate clinical flags or concerns.
-        4. Suggest a recommended immediate action for the clinical team.
-        5. Include a confidence note and a standard medical disclaimer.
+        {'4. Specifically comment on the neurological implications of the EEG findings in relation to the current presentation.' if eeg_context else '4. Note if neurological assessment (EEG) would be beneficial.'}
+        5. Suggest a recommended immediate action for the clinical team.
+        6. Include a confidence note and a standard medical disclaimer.
         
         Constraint: Return ONLY a valid JSON object with the following fields:
         {{
@@ -168,6 +180,71 @@ class GeminiInsightService:
             
         except Exception as e:
             print(f"Gemini Vision API Error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return self._fallback_image_insight()
+
+    async def generate_eeg_pdf_insight(self, pdf_path: str) -> Dict[str, Any]:
+        """
+        Uses Gemini to analyze an EEG PDF document directly.
+        Uploads the PDF file to Gemini for visual interpretation of EEG traces.
+        """
+        if not self.model:
+            return self._fallback_image_insight()
+
+        try:
+            # Upload the PDF file to Gemini
+            uploaded_file = genai.upload_file(pdf_path, mime_type="application/pdf")
+            
+            prompt = """
+            Role: Board-Certified Clinical Neurophysiologist & EEG Specialist
+            Task: Perform a comprehensive visual analysis of this EEG recording document (PDF).
+            
+            Analyze ALL pages of this EEG PDF and interpret the EEG traces visible:
+            
+            1. **Background Activity**: Describe the dominant rhythm, frequency, amplitude, and symmetry.
+            2. **Abnormal Patterns**: Identify any epileptiform discharges (spikes, sharp waves, spike-and-wave complexes), 
+               focal slowing, generalized slowing, burst suppression, or other pathological patterns.
+            3. **Artifact Recognition**: Note any muscle artifact, eye movement artifact, or electrode artifacts.
+            4. **Montage & Technical Quality**: Comment on the recording montage (bipolar/referential), 
+               channel labels, filter settings, and overall signal quality.
+            5. **Clinical Correlation**: Based on the visual patterns, suggest possible clinical correlations 
+               (e.g., epilepsy, encephalopathy, focal lesion, metabolic dysfunction).
+            6. **Confidence Assessment**: Rate your confidence in the analysis on a scale of 0.0 to 1.0, 
+               considering image quality, visible channels, and pattern clarity. Be SPECIFIC and UNIQUE 
+               to this particular recording — do NOT use generic scores.
+            
+            Constraint: Return ONLY a valid JSON object with the following fields:
+            {
+                "prediction_label": "NORMAL or ABNORMAL or BORDERLINE",
+                "confidence_score": <float between 0.0 and 1.0 — unique to THIS specific recording>,
+                "summary": "str — 2-3 sentence executive summary of the EEG findings",
+                "background_activity": "str — description of background rhythms",
+                "risk_level": "str (Low/Moderate/High/Critical)",
+                "key_findings": ["str", ...],
+                "abnormal_patterns": ["str", ...],
+                "clinical_flags": ["str", ...],
+                "clinical_correlation": "str — possible clinical significance",
+                "recommended_action": "str — next steps for the clinical team",
+                "technical_quality": "str (Good/Fair/Poor)",
+                "confidence_note": "str — explain WHY this confidence level was assigned",
+                "disclaimer": "This is an AI decision-support tool for EEG visual analysis. It does not replace interpretation by a board-certified neurophysiologist."
+            }
+            """
+            
+            response = self.model.generate_content([prompt, uploaded_file])
+            text = response.text.strip()
+            
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0].strip()
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0].strip()
+            
+            result = json.loads(text)
+            return result
+            
+        except Exception as e:
+            print(f"Gemini PDF Analysis Error: {str(e)}")
             import traceback
             traceback.print_exc()
             return self._fallback_image_insight()

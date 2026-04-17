@@ -74,7 +74,7 @@ async def process_eeg_task(study_id: int):
     """
     Background Task: Process EEG based on file type.
     - EDF: Extract features → Random Forest → Gemini text insight
-    - PDF: Random Forest (generic) → Gemini text insight
+    - PDF: Extract images from PDF pages → Gemini Vision analysis (same as IMAGE path)
     - IMAGE: Gemini Vision → visual EEG graph interpretation (unique confidence per image)
     """
     from app.db.session import SessionLocal
@@ -88,7 +88,6 @@ async def process_eeg_task(study_id: int):
             # === IMAGE PATH: Use Gemini Vision for visual EEG analysis ===
             insight = await gemini_service.generate_eeg_image_insight(study.file_path)
             
-            # Extract prediction and confidence from the vision response
             label = insight.get("prediction_label", "BORDERLINE")
             score = insight.get("confidence_score", 0.65)
             
@@ -99,8 +98,42 @@ async def process_eeg_task(study_id: int):
                 confidence=score,
                 gemini_insight=insight
             )
+
+        elif study.file_type == "PDF":
+            # === PDF PATH: Extract images from PDF → Gemini Vision analysis ===
+            pdf_image_path = await _extract_image_from_pdf(study.file_path)
+            
+            if pdf_image_path:
+                # Use Gemini Vision on the extracted PDF page image
+                insight = await gemini_service.generate_eeg_image_insight(pdf_image_path)
+                
+                label = insight.get("prediction_label", "BORDERLINE")
+                score = insight.get("confidence_score", 0.65)
+                
+                ai_result = models.AIResult(
+                    study_id=study.id,
+                    model_score=score,
+                    prediction_label=label,
+                    confidence=score,
+                    gemini_insight=insight
+                )
+            else:
+                # Fallback: send the PDF path directly to Gemini Vision (it can read PDFs natively)
+                insight = await gemini_service.generate_eeg_pdf_insight(study.file_path)
+                
+                label = insight.get("prediction_label", "BORDERLINE")
+                score = insight.get("confidence_score", 0.65)
+                
+                ai_result = models.AIResult(
+                    study_id=study.id,
+                    model_score=score,
+                    prediction_label=label,
+                    confidence=score,
+                    gemini_insight=insight
+                )
+
         else:
-            # === EDF/PDF PATH: Feature extraction → Random Forest → Gemini text insight ===
+            # === EDF PATH: Feature extraction → Random Forest → Gemini text insight ===
             features = {}
             if study.file_type == "EDF":
                 features = eeg_service.extract_features(study.file_path)
@@ -123,6 +156,20 @@ async def process_eeg_task(study_id: int):
         study.status = "COMPLETED"
         db.commit()
 
+        # === After EEG completes: auto re-evaluate any pending triage cases for this patient ===
+        try:
+            import httpx
+            patient_id = study.patient_id
+            async with httpx.AsyncClient() as client:
+                await client.post(
+                    f"http://127.0.0.1:8000/api/v1/triage/reevaluate/{patient_id}",
+                    timeout=60.0
+                )
+            print(f"[EEG Complete] Triggered triage re-evaluation for patient {patient_id}")
+        except Exception as re_eval_err:
+            # Non-fatal: log but don't fail the EEG processing
+            print(f"[EEG Complete] Triage re-evaluation skipped: {re_eval_err}")
+
     except Exception as e:
         print(f"Background Job Failed: {str(e)}")
         import traceback
@@ -133,6 +180,82 @@ async def process_eeg_task(study_id: int):
             db.commit()
     finally:
         db.close()
+
+
+async def _extract_image_from_pdf(pdf_path: str) -> str:
+    """
+    Extracts the best image from a PDF for EEG visual analysis.
+    First tries to extract embedded images; falls back to rendering the first page as an image.
+    Returns the path to the extracted image, or empty string on failure.
+    """
+    import fitz  # PyMuPDF
+    
+    try:
+        doc = fitz.open(pdf_path)
+        output_dir = os.path.dirname(pdf_path)
+        base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+        
+        # Strategy 1: Try to extract embedded images from the PDF
+        best_image_path = ""
+        best_image_size = 0
+        
+        for page_num in range(min(len(doc), 5)):  # Check first 5 pages
+            page = doc[page_num]
+            image_list = page.get_images(full=True)
+            
+            for img_idx, img_info in enumerate(image_list):
+                xref = img_info[0]
+                base_image = doc.extract_image(xref)
+                if base_image:
+                    image_bytes = base_image["image"]
+                    image_size = len(image_bytes)
+                    
+                    # Keep the largest image (most likely the EEG trace)
+                    if image_size > best_image_size and image_size > 10000:  # Min 10KB
+                        img_ext = base_image.get("ext", "png")
+                        img_path = os.path.join(output_dir, f"{base_name}_extracted_p{page_num}_{img_idx}.{img_ext}")
+                        with open(img_path, "wb") as f:
+                            f.write(image_bytes)
+                        best_image_path = img_path
+                        best_image_size = image_size
+        
+        if best_image_path:
+            doc.close()
+            return best_image_path
+        
+        # Strategy 2: Render the most content-rich page as a high-res image
+        best_page = 0
+        best_text_len = 0
+        
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            text_len = len(page.get_text())
+            # Pick the page with the most visual content (EEG pages usually have some labels)
+            if text_len > best_text_len:
+                best_text_len = text_len
+                best_page = page_num
+        
+        # If all pages are similar (image-heavy PDFs), use the first page with visual content
+        # Typically page 0 or 1 for EEG reports
+        if len(doc) > 1 and best_text_len < 50:
+            best_page = min(1, len(doc) - 1)  # Try page 2 (index 1) for EEG reports
+        
+        page = doc[best_page]
+        # Render at 3x resolution for clear EEG traces
+        mat = fitz.Matrix(3.0, 3.0)
+        pix = page.get_pixmap(matrix=mat)
+        
+        rendered_path = os.path.join(output_dir, f"{base_name}_rendered_p{best_page}.png")
+        pix.save(rendered_path)
+        
+        doc.close()
+        return rendered_path
+        
+    except Exception as e:
+        print(f"PDF image extraction failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return ""
 
 @router.get("/{study_id}/analysis")
 async def get_eeg_analysis(study_id: int, db: Session = Depends(get_db)):

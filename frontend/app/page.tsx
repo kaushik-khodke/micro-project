@@ -43,8 +43,8 @@ export default function Page() {
 
   useEffect(() => {
     fetchQueue();
-    // Poll every 30 seconds
-    const interval = setInterval(fetchQueue, 30000);
+    // Poll every 10 seconds to catch real-time EEG-triggered severity updates
+    const interval = setInterval(fetchQueue, 10000);
     return () => clearInterval(interval);
   }, []);
 

@@ -1,7 +1,7 @@
 import os
 import pickle
 import numpy as np
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 from app.db.models import Severity
 
 class RandomForestService:
@@ -15,9 +15,10 @@ class RandomForestService:
                 return pickle.load(f)
         return None
 
-    def predict_triage_severity(self, vitals: Dict[str, Any]) -> Tuple[Severity, float]:
+    def predict_triage_severity(self, vitals: Dict[str, Any], eeg_prediction: Optional[str] = None) -> Tuple[Severity, float]:
         """
         Predicts triage severity based on vitals using Random Forest or heuristic fallback.
+        If eeg_prediction is provided (NORMAL/BORDERLINE/ABNORMAL), severity is escalated accordingly.
         """
         # Feature vector extraction
         hr = vitals.get("heart_rate", 80)
@@ -32,15 +33,44 @@ class RandomForestService:
         if hr > 120 or hr < 50: score += 0.5
         if temp > 103 or temp < 95: score += 0.3
         
-        # Mapping score to Severity
+        # Mapping score to base Severity from vitals
         if score >= 0.8:
-            return Severity.RED, 0.95
+            base_severity = Severity.RED
+            confidence = 0.95
         elif score >= 0.5:
-            return Severity.ORANGE, 0.88
+            base_severity = Severity.ORANGE
+            confidence = 0.88
         elif score >= 0.3:
-            return Severity.YELLOW, 0.82
+            base_severity = Severity.YELLOW
+            confidence = 0.82
         else:
-            return Severity.GREEN, 0.90
+            base_severity = Severity.GREEN
+            confidence = 0.90
+
+        # EEG-based severity escalation
+        if eeg_prediction:
+            eeg = eeg_prediction.upper()
+            escalation_map = {
+                # ABNORMAL EEG escalates one full severity level
+                "ABNORMAL": {
+                    Severity.GREEN:  Severity.YELLOW,
+                    Severity.YELLOW: Severity.ORANGE,
+                    Severity.ORANGE: Severity.RED,
+                    Severity.RED:    Severity.RED,
+                },
+                # BORDERLINE EEG only bumps GREEN → YELLOW
+                "BORDERLINE": {
+                    Severity.GREEN:  Severity.YELLOW,
+                    Severity.YELLOW: Severity.YELLOW,
+                    Severity.ORANGE: Severity.ORANGE,
+                    Severity.RED:    Severity.RED,
+                },
+            }
+            if eeg in escalation_map:
+                base_severity = escalation_map[eeg].get(base_severity, base_severity)
+                confidence = min(confidence + 0.05, 0.99)  # Boost confidence when EEG confirms
+
+        return base_severity, confidence
 
     def predict_eeg_abnormality(self, features: Dict[str, float]) -> Tuple[str, float]:
         """
