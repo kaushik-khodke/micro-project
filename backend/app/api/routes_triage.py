@@ -294,10 +294,14 @@ async def get_triage_queue(db: Session = Depends(get_db)):
 
         clinical_insight_dict = case.clinical_insight if case.clinical_insight else None
 
+        # Safety check for orphaned cases
+        p_name = case.patient.name if case.patient else "Unknown Patient"
+        p_mrn = case.patient.mrn if case.patient else "UNKNOWN"
+
         results.append(schemas.TriageCaseOut(
             id=case.id,
-            patient_name=case.patient.name,
-            mrn=case.patient.mrn,
+            patient_name=p_name,
+            mrn=p_mrn,
             severity=case.severity,
             status=case.status,
             arrival_time=case.arrival_time,

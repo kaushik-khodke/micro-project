@@ -24,22 +24,22 @@ export interface PatientCreate {
 
 export const patientService = {
   async getPatients(): Promise<Patient[]> {
-    return apiClient.get<Patient[]>('/patients/');
+    return apiClient.get<Patient[]>('/patients');
   },
 
   async getPatient(id: string): Promise<Patient> {
-    return apiClient.get<Patient>(`/patients/${id}/`);
+    return apiClient.get<Patient>(`/patients/${id}`);
   },
 
   async createPatient(patient: PatientCreate): Promise<Patient> {
-    return apiClient.post<Patient>('/patients/', patient);
+    return apiClient.post<Patient>('/patients', patient);
   },
 
   async updatePatient(id: string, patient: Partial<PatientCreate>): Promise<Patient> {
-    return apiClient.patch<Patient>(`/patients/${id}/`, patient);
+    return apiClient.patch<Patient>(`/patients/${id}`, patient);
   },
 
   async deletePatient(id: string): Promise<void> {
-    return apiClient.delete(`/patients/${id}/`);
+    return apiClient.delete(`/patients/${id}`);
   },
 };

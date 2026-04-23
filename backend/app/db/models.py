@@ -43,8 +43,8 @@ class Patient(Base):
     contact_info = Column(String)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
-    triage_cases = relationship("TriageCase", back_populates="patient")
-    eeg_studies = relationship("EEGStudy", back_populates="patient")
+    triage_cases = relationship("TriageCase", back_populates="patient", cascade="all, delete-orphan")
+    eeg_studies = relationship("EEGStudy", back_populates="patient", cascade="all, delete-orphan")
 
 class TriageCase(Base):
     __tablename__ = "triage_cases"
